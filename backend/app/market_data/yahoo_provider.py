@@ -240,20 +240,76 @@ class YahooMarketDataProvider:
         quote = await self.get_quote(ticker)
         return ReferenceResult(quote.price, DataQuality.LIMITED)
 
-    async def list_assets(self) -> list[dict]:
-        try:
-            response = await self._client.get(
-                "https://www.sec.gov/files/company_tickers_exchange.json",
-                headers={
-                    "User-Agent": self.sec_user_agent,
-                    "Accept-Encoding": "gzip, deflate",
-                    "Accept": "application/json",
-                },
-            )
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
-            raise YahooMarketDataProviderError("SEC stock catalog unavailable") from exc
-        if response.status_code >= 400:
-            raise YahooMarketDataProviderError(f"SEC stock catalog returned {response.status_code}")
+    @staticmethod
+    def _parse_nasdaq_directory(text: str, *, nasdaq_listed: bool) -> list[dict]:
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            return []
+        headers = lines[0].split("|")
+        rows: list[dict] = []
+        for line in lines[1:]:
+            if line.startswith("File Creation Time"):
+                continue
+            values = line.split("|")
+            if len(values) < len(headers):
+                values += [""] * (len(headers) - len(values))
+            row = dict(zip(headers, values))
+            test_issue = str(row.get("Test Issue") or "N").strip().upper()
+            if test_issue == "Y":
+                continue
+            if nasdaq_listed:
+                ticker = str(row.get("Symbol") or "").upper().strip()
+                company = str(row.get("Security Name") or "").strip()
+                exchange = "NASDAQ"
+            else:
+                ticker = str(row.get("ACT Symbol") or row.get("NASDAQ Symbol") or "").upper().strip()
+                company = str(row.get("Security Name") or "").strip()
+                exchange = {
+                    "N": "NYSE", "A": "NYSE AMERICAN", "P": "NYSE ARCA",
+                    "Z": "CBOE", "V": "IEX",
+                }.get(str(row.get("Exchange") or "").strip().upper(), "")
+            if not ticker or not company or not exchange:
+                continue
+            etf = str(row.get("ETF") or "").strip().upper() == "Y"
+            rows.append({
+                "ticker": ticker, "company": company, "exchange": exchange,
+                "sector": None, "asset_type": "ETF" if etf else _asset_type(company),
+            })
+        return rows
+
+    async def _nasdaq_symbol_catalog(self) -> list[dict]:
+        headers = {"User-Agent": "Mozilla/5.0 MarketInsightAI/2.0", "Accept": "text/plain,*/*"}
+        urls = [
+            ("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt", True),
+            ("https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt", False),
+        ]
+
+        async def fetch(url: str, is_nasdaq: bool):
+            response = await self._client.get(url, headers=headers)
+            response.raise_for_status()
+            return self._parse_nasdaq_directory(response.text, nasdaq_listed=is_nasdaq)
+
+        parts = await asyncio.gather(*(fetch(url, flag) for url, flag in urls))
+        seen: set[str] = set()
+        out: list[dict] = []
+        for item in [row for part in parts for row in part]:
+            ticker = item["ticker"]
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            out.append(item)
+        return sorted(out, key=lambda item: item["ticker"])
+
+    async def _sec_symbol_catalog(self) -> list[dict]:
+        response = await self._client.get(
+            "https://www.sec.gov/files/company_tickers_exchange.json",
+            headers={
+                "User-Agent": self.sec_user_agent,
+                "Accept-Encoding": "gzip, deflate",
+                "Accept": "application/json",
+            },
+        )
+        response.raise_for_status()
         payload = response.json()
         fields = payload.get("fields") or []
         rows = payload.get("data") or []
@@ -261,7 +317,7 @@ class YahooMarketDataProvider:
             ticker_i, name_i, exchange_i = fields.index("ticker"), fields.index("name"), fields.index("exchange")
         except ValueError as exc:
             raise YahooMarketDataProviderError("SEC stock catalog schema changed") from exc
-        allowed = {"NASDAQ", "NYSE", "NYSE AMERICAN"}
+        allowed = {"NASDAQ", "NYSE", "NYSE AMERICAN", "NYSE ARCA"}
         out: list[dict] = []
         seen: set[str] = set()
         for row in rows:
@@ -276,6 +332,24 @@ class YahooMarketDataProvider:
             seen.add(ticker)
             out.append({"ticker": ticker, "company": company, "exchange": exchange, "sector": None, "asset_type": _asset_type(company)})
         return sorted(out, key=lambda item: item["ticker"])
+
+    async def list_assets(self) -> list[dict]:
+        errors: list[str] = []
+        try:
+            items = await self._nasdaq_symbol_catalog()
+            if items:
+                return items
+            errors.append("Nasdaq catalog empty")
+        except Exception as exc:
+            errors.append(f"Nasdaq catalog failed: {exc.__class__.__name__}")
+        try:
+            items = await self._sec_symbol_catalog()
+            if items:
+                return items
+            errors.append("SEC catalog empty")
+        except Exception as exc:
+            errors.append(f"SEC catalog failed: {exc.__class__.__name__}")
+        raise YahooMarketDataProviderError("; ".join(errors) or "No symbol catalog available")
 
     async def stream_quotes(self, tickers: list[str]) -> AsyncIterator[Quote]:
         symbols = sorted({x.upper().strip() for x in tickers if x.strip()})

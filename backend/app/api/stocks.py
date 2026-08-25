@@ -11,14 +11,9 @@ from app.market_data.service import MarketDataService, get_market_data_provider,
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
-DEFAULT = [
-    {"ticker":"AAPL","company":"Apple Inc.","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK","index_memberships":["S&P 500","Nasdaq"],"themes":["Technology","AI"],"market_cap_bucket":"Mega Cap","most_active":True},
-    {"ticker":"MSFT","company":"Microsoft Corporation","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK","index_memberships":["S&P 500","Nasdaq","Dow"],"themes":["Technology","AI"],"market_cap_bucket":"Mega Cap","most_active":True},
-    {"ticker":"NVDA","company":"NVIDIA Corporation","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK","index_memberships":["S&P 500","Nasdaq"],"themes":["Technology","AI","Semiconductors"],"market_cap_bucket":"Mega Cap","most_active":True},
-    {"ticker":"AMD","company":"Advanced Micro Devices, Inc.","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK","index_memberships":["S&P 500","Nasdaq"],"themes":["Technology","AI","Semiconductors"],"market_cap_bucket":"Mega Cap","most_active":True},
-    {"ticker":"TSLA","company":"Tesla, Inc.","exchange":"NASDAQ","sector":"Consumer","asset_type":"STOCK"},
-    {"ticker":"AMZN","company":"Amazon.com, Inc.","exchange":"NASDAQ","sector":"Consumer","asset_type":"STOCK"},
-]
+from app.market_data.fallback_catalog import FALLBACK_CATALOG
+
+DEFAULT = FALLBACK_CATALOG
 
 
 async def catalog(request: Request, provider):

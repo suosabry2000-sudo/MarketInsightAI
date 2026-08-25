@@ -134,3 +134,49 @@ def test_stock_catalog_filters_search_and_asset_type_before_paging():
         assert r.status_code==200
         assert r.json()['total']==1
         assert r.json()['results'][0]['ticker']=='GOLD'
+
+
+def test_stock_catalog_provider_failure_uses_broad_embedded_fallback():
+    class BrokenCatalogProvider(FakeMarketDataProvider):
+        async def list_assets(self):
+            raise RuntimeError("catalog source down")
+
+    with TestClient(create_app(provider=BrokenCatalogProvider())) as c:
+        r = c.get('/stocks/catalog?offset=0&limit=5000')
+        assert r.status_code == 200
+        body = r.json()
+        assert body['total'] >= 150
+        assert len(body['results']) >= 150
+        assert {'AAPL', 'JPM', 'XOM', 'LLY', 'UBER'} <= {x['ticker'] for x in body['results']}
+
+
+def test_market_overview_is_catalog_driven_not_fixed_to_six_symbols():
+    from datetime import datetime, timezone
+    from app.domain.models import DataQuality, PriceBar, Quote
+
+    class OverviewProvider(FakeMarketDataProvider):
+        async def list_assets(self):
+            return [
+                {"ticker": f"ZZ{i}", "company": f"Company {i}", "exchange": "NYSE", "sector": "Test", "asset_type": "STOCK"}
+                for i in range(12)
+            ]
+        async def get_quotes(self, tickers):
+            now = datetime.now(timezone.utc)
+            return {
+                ticker: Quote(
+                    ticker=ticker, price=100.0 + i, provider="test", provider_timestamp=now,
+                    normalized_timestamp=now, market_session="OPEN", freshness_seconds=0,
+                    data_quality=DataQuality.VERIFIED, feed_scope="TEST", feed_label="Test",
+                    consolidated=True, change_pct=float(i),
+                )
+                for i, ticker in enumerate(tickers)
+            }
+
+    with TestClient(create_app(provider=OverviewProvider())) as c:
+        r = c.get('/markets/overview')
+        assert r.status_code == 200
+        body = r.json()
+        assert body['catalog_total'] == 12
+        returned = {x['ticker'] for key in ('top_gainers', 'top_losers', 'most_active') for x in body[key]}
+        assert any(ticker.startswith('ZZ') for ticker in returned)
+        assert not returned <= {'AAPL','MSFT','NVDA','AMD','TSLA','AMZN'}

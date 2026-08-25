@@ -123,3 +123,43 @@ async def test_yahoo_provider_bulk_quotes_use_single_spark_request_for_multiple_
     assert quotes["AAPL"].price == pytest.approx(310.0)
     assert quotes["MSFT"].price == pytest.approx(500.0)
     assert quotes["AAPL"].change_pct == pytest.approx((310.0 - 300.0) / 300.0 * 100.0)
+
+
+@pytest.mark.asyncio
+async def test_yahoo_provider_uses_nasdaq_symbol_directories_when_sec_is_blocked():
+    from app.market_data.yahoo_provider import YahooMarketDataProvider
+
+    def handler(req: httpx.Request):
+        if req.url.host == "www.nasdaqtrader.com" and req.url.path.endswith("/nasdaqlisted.txt"):
+            return httpx.Response(
+                200,
+                text=(
+                    "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\n"
+                    "AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N\n"
+                    "QQQ|Invesco QQQ Trust, Series 1|G|N|N|100|Y|N\n"
+                    "ZTEST|Test Security|S|Y|N|100|N|N\n"
+                    "File Creation Time: 0825202620:00|||||||\n"
+                ),
+            )
+        if req.url.host == "www.nasdaqtrader.com" and req.url.path.endswith("/otherlisted.txt"):
+            return httpx.Response(
+                200,
+                text=(
+                    "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol\n"
+                    "JPM|JPMorgan Chase & Co. Common Stock|N|JPM|N|100|N|JPM\n"
+                    "SPY|SPDR S&P 500 ETF Trust|P|SPY|Y|100|N|SPY\n"
+                    "TESTX|Test Security|A|TESTX|N|100|Y|TESTX\n"
+                    "File Creation Time: 0825202620:00|||||||\n"
+                ),
+            )
+        if req.url.host == "www.sec.gov":
+            return httpx.Response(403, text="blocked")
+        raise AssertionError(str(req.url))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = YahooMarketDataProvider(client=client, sec_user_agent="MarketInsightAI test@example.com")
+        assets = await provider.list_assets()
+
+    assert [x["ticker"] for x in assets] == ["AAPL", "JPM", "QQQ", "SPY"]
+    assert next(x for x in assets if x["ticker"] == "QQQ")["asset_type"] == "ETF"
+    assert next(x for x in assets if x["ticker"] == "SPY")["exchange"] == "NYSE ARCA"
