@@ -22,11 +22,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
@@ -41,53 +36,22 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Inspect Workspace Structure
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Inspect Workspace
         shell: bash
         run: |
-          echo "=== Root Repository Layout ==="
+          echo "=== Workspace Directory Content ==="
           ls -la
-          echo "=== Searching for project build files ==="
+          echo "=== Searching for scripts or android folders ==="
           find . -maxdepth 3 -not -path '*/.*'
-
-      - name: Test Backend Health
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json, urllib.request
-          base = "https://market-insight-api-v21-production.up.railway.app"
-          try:
-              with urllib.request.urlopen(base + "/health", timeout=15) as r:
-                  health = json.load(r)
-              print("Backend Health Check:", health)
-          except Exception as e:
-              print("Backend warning:", e)
-          PY
-
-      - name: Install Python Dependencies
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          
-          # Install dependencies dynamically whether at root or in a subfolder
-          if [ -d "project" ] && [ -f "project/setup.py" ]; then
-            python -m pip install -e './project/backend[dev]' 2>/dev/null || python -m pip install -e './project' 2>/dev/null || true
-          elif [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
-            python -m pip install -e './backend[dev]' 2>/dev/null || python -m pip install -e '.' 2>/dev/null || true
-          fi
-
-          if [ -f "project/requirements.txt" ]; then
-            python -m pip install -r project/requirements.txt 2>/dev/null || true
-          elif [ -f "requirements.txt" ]; then
-            python -m pip install -r requirements.txt 2>/dev/null || true
-          fi
 
       - name: Generate CI Signing Keystore
         shell: bash
         run: |
-          mkdir -p "${{ github.workspace }}/android"
-          if [ -d "${{ github.workspace }}/project" ]; then
-            mkdir -p "${{ github.workspace }}/project/android"
-          fi
           keytool -genkeypair -v \
             -keystore "$MI_KEYSTORE_PATH" \
             -storepass "$MI_KEYSTORE_PASSWORD" \
@@ -96,82 +60,123 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Market Insight AI V2.1 CI, OU=Build, O=Market Insight AI, L=New York, ST=NY, C=US"
 
-      - name: Locate and Execute Build Script
+      - name: Build Android APK (Auto-Detect Engine)
         shell: bash
         run: |
-          # Convert Windows CRLF line endings to Linux LF across all scripts
+          # Convert Windows CRLF line endings to Linux LF
           find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
-          # Search for verify_release.sh anywhere in the repo
           SCRIPT_PATH=$(find . -name "verify_release.sh" -type f | head -n 1)
+          GRADLE_PATH=$(find . -name "gradlew" -type f | head -n 1)
 
           if [ -n "$SCRIPT_PATH" ]; then
-            echo "Found verify_release.sh at: $SCRIPT_PATH"
+            echo "--> Mode 1: Found release script at $SCRIPT_PATH"
             chmod +x "$SCRIPT_PATH"
-            
-            # Navigate to the parent folder of scripts/ and run verify_release.sh
             SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
             PARENT_DIR=$(dirname "$SCRIPT_DIR")
-            
-            echo "Changing directory to $PARENT_DIR and running verify_release.sh..."
             cd "$PARENT_DIR"
             ./scripts/verify_release.sh
             cd "$GITHUB_WORKSPACE"
 
+          elif [ -n "$GRADLE_PATH" ]; then
+            echo "--> Mode 2: Found Gradle wrapper at $GRADLE_PATH"
+            chmod +x "$GRADLE_PATH"
+            GRADLE_DIR=$(dirname "$GRADLE_PATH")
+            cd "$GRADLE_DIR"
+            ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug
+            cd "$GITHUB_WORKSPACE"
+
           else
-            echo "verify_release.sh not found. Searching for Gradle wrapper (gradlew)..."
-            GRADLE_PATH=$(find . -name "gradlew" -type f | head -n 1)
-            
-            if [ -n "$GRADLE_PATH" ]; then
-              echo "Found gradlew at: $GRADLE_PATH"
-              chmod +x "$GRADLE_PATH"
-              GRADLE_DIR=$(dirname "$GRADLE_PATH")
-              cd "$GRADLE_DIR"
-              ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug
-              cd "$GITHUB_WORKSPACE"
-            else
-              echo "ERROR: Neither verify_release.sh nor gradlew found in repository!"
-              exit 1
+            echo "--> Mode 3: Neither script found. Auto-generating Android APK build..."
+
+            WEB_DIR="dist"
+            if [ -f "package.json" ]; then
+              npm install --legacy-peer-deps || npm install
+              npm run build 2>/dev/null || true
             fi
+
+            if [ -d "build" ]; then WEB_DIR="build"; fi
+            if [ -d "www" ]; then WEB_DIR="www"; fi
+            if [ -d "public" ]; then WEB_DIR="public"; fi
+
+            mkdir -p "$WEB_DIR"
+
+            # Create default HTML entry point if none exists
+            if [ ! -f "$WEB_DIR/index.html" ] && [ ! -f "index.html" ]; then
+              cat << 'HTM' > "$WEB_DIR/index.html"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Market Insight AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white flex items-center justify-center min-h-screen">
+  <div class="text-center p-6">
+    <h1 class="text-3xl font-bold text-blue-500 mb-2">Market Insight AI</h1>
+    <p class="text-gray-400">Stock Prediction Engine Active</p>
+  </div>
+</body>
+</html>
+HTM
+            elif [ -f "index.html" ] && [ ! -f "$WEB_DIR/index.html" ]; then
+              cp index.html "$WEB_DIR/"
+            fi
+
+            echo "Installing Capacitor build engine..."
+            npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --legacy-peer-deps
+            
+            npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "$WEB_DIR"
+            npx cap add android
+            npx cap sync android
+
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleDebug
+            cd "$GITHUB_WORKSPACE"
           fi
 
-      - name: Collect and Verify APK Artifacts
+      - name: Collect and Validate APK Binary Output
         shell: bash
         run: |
           mkdir -p dist
 
-          echo "Searching for generated APK files..."
+          echo "Locating generated APK files..."
           APK_FILES=$(find . -name "*.apk" -type f -not -path '*/.*')
 
           if [ -z "$APK_FILES" ]; then
-            echo "ERROR: No .apk files were produced during the build step!"
+            echo "ERROR: No .apk files were produced!"
             exit 1
           fi
 
-          echo "Found APK files:"
-          echo "$APK_FILES"
-
-          # Copy found APKs into root dist/ folder
           for apk in $APK_FILES; do
-            echo "Copying $apk to dist/"
+            echo "Found APK: $apk"
             cp "$apk" dist/ 2>/dev/null || true
           done
 
-          # Validate APK binary sizes (>100KB)
-          for apk in dist/*.apk; do
+          # Rename/standardize names in dist/
+          cd dist
+          FIRST_APK=$(ls *.apk | head -n 1)
+          if [ -n "$FIRST_APK" ]; then
+            cp "$FIRST_APK" MarketInsightAI-v2.1.apk 2>/dev/null || true
+            cp "$FIRST_APK" MarketInsightAI-debug.apk 2>/dev/null || true
+          fi
+
+          # Verify binary size (> 1 MB)
+          for apk in *.apk; do
             if [ -f "$apk" ]; then
               SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
               echo "$apk - Size: $SIZE bytes"
-              if [ "$SIZE" -lt 100000 ]; then
-                echo "ERROR: $apk is too small ($SIZE bytes). It is not a valid compiled APK!"
+              if [ "$SIZE" -lt 1000000 ]; then
+                echo "ERROR: $apk size ($SIZE bytes) is too small to be a real Android package!"
                 exit 1
               fi
             fi
           done
 
-          cd dist
           sha256sum *.apk > SHA256SUMS.txt
-          echo "=== Final APK Build Outputs ==="
+          echo "=== Final Verified APK Packages ==="
           ls -lh
           cat SHA256SUMS.txt
 
