@@ -1,7 +1,7 @@
 name: Market Insight AI V2.1 Build Now
 
 on:
-  workflow_dispatch: # Trigger manually from your phone via the GitHub mobile app
+  workflow_dispatch: # Allows manual run from GitHub App / Mobile Web
 
 permissions:
   contents: read
@@ -41,14 +41,6 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Inspect Workspace
-        shell: bash
-        run: |
-          echo "=== Workspace Directory Content ==="
-          ls -la
-          echo "=== Searching for scripts or android folders ==="
-          find . -maxdepth 3 -not -path '*/.*'
-
       - name: Generate CI Signing Keystore
         shell: bash
         run: |
@@ -60,17 +52,17 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Market Insight AI V2.1 CI, OU=Build, O=Market Insight AI, L=New York, ST=NY, C=US"
 
-      - name: Build Android APK (Auto-Detect Engine)
+      - name: Build Android APK
         shell: bash
         run: |
-          # Convert Windows CRLF line endings to Linux LF
+          # Convert line endings
           find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
           SCRIPT_PATH=$(find . -name "verify_release.sh" -type f | head -n 1)
           GRADLE_PATH=$(find . -name "gradlew" -type f | head -n 1)
 
           if [ -n "$SCRIPT_PATH" ]; then
-            echo "--> Mode 1: Found release script at $SCRIPT_PATH"
+            echo "Running verify_release.sh script at $SCRIPT_PATH"
             chmod +x "$SCRIPT_PATH"
             SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
             PARENT_DIR=$(dirname "$SCRIPT_DIR")
@@ -79,7 +71,7 @@ jobs:
             cd "$GITHUB_WORKSPACE"
 
           elif [ -n "$GRADLE_PATH" ]; then
-            echo "--> Mode 2: Found Gradle wrapper at $GRADLE_PATH"
+            echo "Running Gradle wrapper at $GRADLE_PATH"
             chmod +x "$GRADLE_PATH"
             GRADLE_DIR=$(dirname "$GRADLE_PATH")
             cd "$GRADLE_DIR"
@@ -87,8 +79,7 @@ jobs:
             cd "$GITHUB_WORKSPACE"
 
           else
-            echo "--> Mode 3: Neither script found. Auto-generating Android APK build..."
-
+            echo "Auto-generating Capacitor Android APK build..."
             WEB_DIR="dist"
             if [ -f "package.json" ]; then
               npm install --legacy-peer-deps || npm install
@@ -101,7 +92,6 @@ jobs:
 
             mkdir -p "$WEB_DIR"
 
-            # Create default HTML entry point if none exists
             if [ ! -f "$WEB_DIR/index.html" ] && [ ! -f "index.html" ]; then
               cat << 'HTM' > "$WEB_DIR/index.html"
 <!DOCTYPE html>
@@ -110,13 +100,9 @@ jobs:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Market Insight AI</title>
-  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-black text-white flex items-center justify-center min-h-screen">
-  <div class="text-center p-6">
-    <h1 class="text-3xl font-bold text-blue-500 mb-2">Market Insight AI</h1>
-    <p class="text-gray-400">Stock Prediction Engine Active</p>
-  </div>
+<body style="background:#000;color:#fff;display:flex;justify-content:center;align-items:center;height:100vh;">
+  <h2>Market Insight AI Engine Active</h2>
 </body>
 </html>
 HTM
@@ -124,9 +110,7 @@ HTM
               cp index.html "$WEB_DIR/"
             fi
 
-            echo "Installing Capacitor build engine..."
             npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --legacy-peer-deps
-            
             npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "$WEB_DIR"
             npx cap add android
             npx cap sync android
@@ -137,12 +121,10 @@ HTM
             cd "$GITHUB_WORKSPACE"
           fi
 
-      - name: Collect and Validate APK Binary Output
+      - name: Collect and Validate APK
         shell: bash
         run: |
           mkdir -p dist
-
-          echo "Locating generated APK files..."
           APK_FILES=$(find . -name "*.apk" -type f -not -path '*/.*')
 
           if [ -z "$APK_FILES" ]; then
@@ -151,11 +133,9 @@ HTM
           fi
 
           for apk in $APK_FILES; do
-            echo "Found APK: $apk"
             cp "$apk" dist/ 2>/dev/null || true
           done
 
-          # Rename/standardize names in dist/
           cd dist
           FIRST_APK=$(ls *.apk | head -n 1)
           if [ -n "$FIRST_APK" ]; then
@@ -163,22 +143,18 @@ HTM
             cp "$FIRST_APK" MarketInsightAI-debug.apk 2>/dev/null || true
           fi
 
-          # Verify binary size (> 1 MB)
           for apk in *.apk; do
             if [ -f "$apk" ]; then
               SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
               echo "$apk - Size: $SIZE bytes"
               if [ "$SIZE" -lt 1000000 ]; then
-                echo "ERROR: $apk size ($SIZE bytes) is too small to be a real Android package!"
+                echo "ERROR: $apk size ($SIZE bytes) is too small!"
                 exit 1
               fi
             fi
           done
 
           sha256sum *.apk > SHA256SUMS.txt
-          echo "=== Final Verified APK Packages ==="
-          ls -lh
-          cat SHA256SUMS.txt
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
