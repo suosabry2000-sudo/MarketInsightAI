@@ -1,7 +1,7 @@
 name: Market Insight AI V2.1 Build Now
 
 on:
-  workflow_dispatch: # Run manually from your phone in GitHub Mobile App
+  workflow_dispatch: # Trigger manually from your phone via GitHub Mobile App
 
 permissions:
   contents: read
@@ -41,14 +41,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Fix script permissions and line endings
+      - name: Inspect Repository Structure
         shell: bash
         run: |
-          # Convert Windows CRLF line endings to Linux LF
-          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + || true
-          find . -type f -name "*.sh" -exec chmod +x {} + || true
+          echo "=== Repository Directory Structure ==="
+          find . -maxdepth 3 -not -path '*/.*'
 
-      - name: Test backend health
+      - name: Test Backend Health
         shell: bash
         run: |
           python - <<'PY'
@@ -62,25 +61,29 @@ jobs:
               print("Backend warning:", e)
           PY
 
-      - name: Install Python dependencies
+      - name: Install Python Dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          if [ -d "project" ]; then
-            cd project
-            if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
-              python -m pip install -e './backend[dev]' 2>/dev/null || python -m pip install -e '.' 2>/dev/null || true
-            fi
-            if [ -f "requirements.txt" ]; then
-              python -m pip install -r requirements.txt 2>/dev/null || true
-            fi
+          # Install from any directory that contains setup.py or requirements.txt
+          SETUP_PY=$(find . -name "setup.py" -o -name "pyproject.toml" | head -n 1)
+          if [ -n "$SETUP_PY" ]; then
+            SETUP_DIR=$(dirname "$SETUP_PY")
+            echo "Installing Python dependencies from $SETUP_DIR..."
+            cd "$SETUP_DIR"
+            python -m pip install -e './backend[dev]' 2>/dev/null || python -m pip install -e '.' 2>/dev/null || true
             cd "$GITHUB_WORKSPACE"
           fi
+          REQ_TXT=$(find . -name "requirements.txt" | head -n 1)
+          if [ -n "$REQ_TXT" ]; then
+            python -m pip install -r "$REQ_TXT" 2>/dev/null || true
+          fi
 
-      - name: Generate CI signing keystore
+      - name: Generate CI Signing Keystore
         shell: bash
         run: |
           mkdir -p "${{ github.workspace }}/project/android"
+          mkdir -p "${{ github.workspace }}/android"
           keytool -genkeypair -v \
             -keystore "$MI_KEYSTORE_PATH" \
             -storepass "$MI_KEYSTORE_PASSWORD" \
@@ -89,60 +92,90 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Market Insight AI V2.1 CI, OU=Build, O=Market Insight AI, L=New York, ST=NY, C=US"
 
-      - name: Execute verify_release.sh
+      - name: Locate and Execute Build Script
         shell: bash
         run: |
-          if [ -d "project" ] && [ -f "project/scripts/verify_release.sh" ]; then
-            cd project
+          # Sanitize line endings across all shell scripts in the repo
+          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
+          # Dynamically locate verify_release.sh anywhere in the repo
+          SCRIPT_PATH=$(find . -name "verify_release.sh" -type f | head -n 1)
+
+          if [ -n "$SCRIPT_PATH" ]; then
+            echo "Found release script at: $SCRIPT_PATH"
+            chmod +x "$SCRIPT_PATH"
+            
+            # Determine directory where scripts/ folder lives
+            SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+            WORKING_DIR=$(dirname "$SCRIPT_DIR")
+            
+            echo "Executing script in working directory: $WORKING_DIR"
+            cd "$WORKING_DIR"
             ./scripts/verify_release.sh
-          elif [ -f "scripts/verify_release.sh" ]; then
-            ./scripts/verify_release.sh
+            cd "$GITHUB_WORKSPACE"
+
           else
-            echo "Error: verify_release.sh script not found!"
+            echo "verify_release.sh not found. Searching for Gradle wrapper (gradlew)..."
+            GRADLE_PATH=$(find . -name "gradlew" -type f | head -n 1)
+            
+            if [ -n "$GRADLE_PATH" ]; then
+              echo "Found Gradle wrapper at: $GRADLE_PATH"
+              chmod +x "$GRADLE_PATH"
+              GRADLE_DIR=$(dirname "$GRADLE_PATH")
+              cd "$GRADLE_DIR"
+              ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug
+              cd "$GITHUB_WORKSPACE"
+            else
+              echo "ERROR: Neither verify_release.sh nor gradlew was found in the repository!"
+              exit 1
+            fi
+          fi
+
+      - name: Collect and Verify APK Outputs
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          echo "Searching for built .apk files..."
+          APK_FILES=$(find . -name "*.apk" -type f -not -path '*/.*')
+
+          if [ -z "$APK_FILES" ]; then
+            echo "ERROR: No .apk files were produced by the build step!"
             exit 1
           fi
 
-      - name: Confirm real APK build outputs
-        shell: bash
-        run: |
-          TARGET_DIR="dist"
-          if [ -d "project/dist" ]; then
-            TARGET_DIR="project/dist"
-          fi
+          echo "Found APK files:"
+          echo "$APK_FILES"
 
-          echo "Checking APKs in $TARGET_DIR..."
-          ls -lh "$TARGET_DIR"
+          # Copy found APKs into the root dist/ directory
+          for apk in $APK_FILES; do
+            echo "Copying $apk to dist/"
+            cp "$apk" dist/ 2>/dev/null || true
+          done
 
-          # Verify that files exist and are REAL binaries (>100KB)
-          FOUND_APK=0
-          for apk in "$TARGET_DIR"/*.apk; do
+          # Validate APK file sizes (must be a real binary > 100KB)
+          for apk in dist/*.apk; do
             if [ -f "$apk" ]; then
               SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
-              echo "Found $apk - Size: $SIZE bytes"
+              echo "$apk - Size: $SIZE bytes"
               if [ "$SIZE" -lt 100000 ]; then
-                echo "ERROR: $apk is too small ($SIZE bytes). It is not a real APK!"
+                echo "ERROR: $apk is too small ($SIZE bytes). It is not a valid Android package!"
                 exit 1
               fi
-              FOUND_APK=1
             fi
           done
 
-          if [ "$FOUND_APK" -eq 0 ]; then
-            echo "ERROR: No .apk files generated!"
-            exit 1
-          fi
-
-          cd "$TARGET_DIR"
+          cd dist
           sha256sum *.apk > SHA256SUMS.txt
+          echo "=== Final Build Artifacts ==="
+          ls -lh
           cat SHA256SUMS.txt
 
-      - name: Upload APK artifacts
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: MarketInsightAI-v2.1-APK
           path: |
-            project/dist/*.apk
-            project/dist/SHA256SUMS.txt
             dist/*.apk
             dist/SHA256SUMS.txt
           retention-days: 14
