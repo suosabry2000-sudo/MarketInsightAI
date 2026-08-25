@@ -11,10 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      MI_KEYSTORE_PATH: ${{ github.workspace }}/project/android/ci-release.jks
-      MI_KEYSTORE_PASSWORD: ci-market-insight-2026
-      MI_KEY_ALIAS: market-insight
-      MI_KEY_PASSWORD: ci-market-insight-2026
       MARKET_INSIGHT_API_BASE_URL: https://market-insight-api-v21-production.up.railway.app/
       MARKET_INSIGHT_WS_BASE_URL: wss://market-insight-api-v21-production.up.railway.app/
 
@@ -57,16 +53,163 @@ jobs:
           print("FULL STOCK UNIVERSE VERIFIED")
           PY
 
-      - name: Unpack V2.1 Android source & outputs
+      - name: Generate Android App Source On-The-Fly
         shell: bash
         run: |
           python - <<'PY'
           import os
-          os.makedirs("app/build/outputs/apk/release", exist_ok=True)
-          apk_path = "app/build/outputs/apk/release/MarketInsightAI-V2.1-release.apk"
-          with open(apk_path, "w") as f:
-              f.write("MARKET INSIGHT AI V2.1 RELEASE BUILD ARTIFACT")
-          print("Android release package structure prepared successfully.")
+
+          os.makedirs("app/src/main/java/com/marketinsight/ai", exist_ok=True)
+          os.makedirs("app/src/main/res/layout", exist_ok=True)
+          os.makedirs("app/src/main/res/values", exist_ok=True)
+
+          with open("build.gradle", "w") as f:
+              f.write("""
+              buildscript {
+                  repositories {
+                      google()
+                      mavenCentral()
+                  }
+                  dependencies {
+                      classpath 'com.android.tools.build:gradle:8.1.2'
+                  }
+              }
+              allprojects {
+                  repositories {
+                      google()
+                      mavenCentral()
+                  }
+              }
+              task clean(type: Delete) {
+                  delete rootProject.buildDir
+              }
+              """)
+
+          with open("settings.gradle", "w") as f:
+              f.write("""
+              pluginManagement {
+                  repositories {
+                      google()
+                      mavenCentral()
+                      gradlePluginPortal()
+                  }
+              }
+              dependencyResolutionManagement {
+                  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+                  repositories {
+                      google()
+                      mavenCentral()
+                  }
+              }
+              rootProject.name = "MarketInsightAI"
+              include ':app'
+              """)
+
+          with open("app/build.gradle", "w") as f:
+              f.write("""
+              plugins {
+                  id 'com.android.application'
+              }
+              android {
+                  namespace 'com.marketinsight.ai'
+                  compileSdk 34
+
+                  defaultConfig {
+                      applicationId "com.marketinsight.ai"
+                      minSdk 24
+                      targetSdk 34
+                      versionCode 1
+                      versionName "2.1"
+                  }
+
+                  buildTypes {
+                      release {
+                          minifyEnabled false
+                          proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                      }
+                  }
+                  compileOptions {
+                      sourceCompatibility JavaVersion.VERSION_17
+                      targetCompatibility JavaVersion.VERSION_17
+                  }
+              }
+              dependencies {
+                  implementation 'androidx.appcompat:appcompat:1.6.1'
+                  implementation 'com.google.android.material:material:1.9.0'
+                  implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+              }
+              """)
+
+          with open("app/src/main/AndroidManifest.xml", "w") as f:
+              f.write("""<?xml version="1.0" encoding="utf-8"?>
+              <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                  <uses-permission android:name="android.permission.INTERNET" />
+                  <application
+                      android:allowBackup="true"
+                      android:label="Market Insight AI"
+                      android:supportsRtl="true"
+                      android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                      <activity
+                          android:name=".MainActivity"
+                          android:exported="true">
+                          <intent-filter>
+                              <action android:name="android.intent.action.MAIN" />
+                              <category android:name="android.intent.category.LAUNCHER" />
+                          </intent-filter>
+                      </activity>
+                  </application>
+              </manifest>
+              """)
+
+          with open("app/src/main/res/layout/activity_main.xml", "w") as f:
+              f.write("""<?xml version="1.0" encoding="utf-8"?>
+              <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:orientation="vertical">
+                  <WebView
+                      android:id="@+id/webview"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent" />
+              </LinearLayout>
+              """)
+
+          with open("app/src/main/java/com/marketinsight/ai/MainActivity.java", "w") as f:
+              f.write("""package com.marketinsight.ai;
+
+              import android.os.Bundle;
+              import android.webkit.WebSettings;
+              import android.webkit.WebView;
+              import android.webkit.WebViewClient;
+              import androidx.appcompat.app.AppCompatActivity;
+
+              public class MainActivity extends AppCompatActivity {
+                  private WebView webView;
+
+                  @Override
+                  protected void onCreate(Bundle savedInstanceState) {
+                      super.onCreate(savedInstanceState);
+                      setContentView(R.layout.activity_main);
+
+                      webView = findViewById(R.id.webview);
+                      WebSettings webSettings = webView.getSettings();
+                      webSettings.setJavaScriptEnabled(true);
+                      webSettings.setDomStorageEnabled(true);
+                      webView.setWebViewClient(new WebViewClient());
+                      webView.loadUrl("https://market-insight-api-v21-production.up.railway.app/");
+                  }
+
+                  @Override
+                  public void onBackPressed() {
+                      if (webView.canGoBack()) {
+                          webView.goBack();
+                      } else {
+                          super.onBackPressed();
+                      }
+                  }
+              }
+              """)
+          print("Android app source generated successfully.")
           PY
 
       - name: Set up Java 17
@@ -78,23 +221,12 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Android APK (Graceful Execution)
+      - name: Build Android APK
         shell: bash
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleRelease
-          elif [ -f "./project/android/gradlew" ]; then
-            cd project/android
-            chmod +x ./gradlew
-            ./gradlew assembleRelease
-          elif [ -f "./android/gradlew" ]; then
-            cd android
-            chmod +x ./gradlew
-            ./gradlew assembleRelease
-          else
-            echo "Standard gradle wrapper not found in this repository branch. Proceeding with verified package build bundle."
-          fi
+          gradle wrapper
+          chmod +x ./gradlew
+          ./gradlew assembleRelease
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -102,5 +234,4 @@ jobs:
           name: MarketInsightAI-V2.1-Release
           path: |
             app/build/outputs/apk/release/*.apk
-            **/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
