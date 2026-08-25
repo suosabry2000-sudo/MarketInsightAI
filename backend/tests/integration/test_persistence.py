@@ -26,3 +26,8 @@ def test_forecast_outcome_is_scored_once_and_accuracy_is_computed(tmp_path):
     assert report['range_capture_pct']==100
     assert 0 < report['average_target_error_pct'] < 1
     s.close()
+
+
+def test_normalize_url_forces_psycopg3_for_railway_postgresql_url():
+    from app.database.store import normalize_url
+    assert normalize_url('postgresql://user:pass@db:5432/app') == 'postgresql+psycopg://user:pass@db:5432/app'

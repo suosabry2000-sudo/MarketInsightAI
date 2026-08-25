@@ -5,7 +5,7 @@ from sqlalchemy import create_engine,delete,select
 from sqlalchemy.orm import Session,sessionmaker
 from app.database.models import Base,WatchlistModel,AlertModel,PushTokenModel,ForecastModel
 
-def normalize_url(url:str):return url.replace('postgresql+psycopg2://','postgresql+psycopg://').replace('postgres://','postgresql+psycopg://')
+def normalize_url(url:str):return url.replace('postgresql+psycopg2://','postgresql+psycopg://').replace('postgres://','postgresql+psycopg://').replace('postgresql://','postgresql+psycopg://')
 class SqlStore:
     def __init__(self,url:str):self.engine=create_engine(normalize_url(url),pool_pre_ping=True);Base.metadata.create_all(self.engine);self.sessions=sessionmaker(bind=self.engine,expire_on_commit=False)
     def add_watchlist(self,principal,ticker):
