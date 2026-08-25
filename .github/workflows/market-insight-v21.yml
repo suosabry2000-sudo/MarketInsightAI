@@ -181,7 +181,7 @@ jobs:
                   }
 
                   @Override
-                  public void onBackPressed() {
+                  protected void onBackPressed() {
                       if (webView.canGoBack()) {
                           webView.goBack();
                       } else {
@@ -205,9 +205,9 @@ jobs:
       - name: Build Android APK
         shell: bash
         run: |
-          gradle wrapper
+          gradle wrapper --gradle-version 8.4
           chmod +x ./gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --warning-mode summary
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
