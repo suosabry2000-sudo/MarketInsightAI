@@ -1,7 +1,7 @@
 name: Market Insight AI V2.1 Build Now
 
 on:
-  workflow_dispatch: # Trigger manually from your phone via the GitHub app
+  workflow_dispatch: # Run manually from your phone in GitHub Mobile App
 
 permissions:
   contents: read
@@ -28,17 +28,27 @@ jobs:
           python-version: '3.13'
 
       - name: Setup Java JDK
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Verify Backend Health
+      - name: Fix script permissions and line endings
+        shell: bash
+        run: |
+          # Convert Windows CRLF line endings to Linux LF
+          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + || true
+          find . -type f -name "*.sh" -exec chmod +x {} + || true
+
+      - name: Test backend health
         shell: bash
         run: |
           python - <<'PY'
@@ -47,15 +57,15 @@ jobs:
           try:
               with urllib.request.urlopen(base + "/health", timeout=15) as r:
                   health = json.load(r)
-              print("Backend Health:", health)
+              print("Backend Health Check:", health)
           except Exception as e:
-              print("Health check warning:", e)
+              print("Backend warning:", e)
           PY
 
-      - name: Install Python Dependencies
+      - name: Install Python dependencies
         shell: bash
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           if [ -d "project" ]; then
             cd project
             if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
@@ -66,15 +76,11 @@ jobs:
             fi
             cd "$GITHUB_WORKSPACE"
           fi
-          if [ -f "requirements.txt" ]; then
-            python -m pip install -r requirements.txt 2>/dev/null || true
-          fi
 
-      - name: Generate CI Signing Keystore
+      - name: Generate CI signing keystore
         shell: bash
         run: |
           mkdir -p "${{ github.workspace }}/project/android"
-          mkdir -p "${{ github.workspace }}/android"
           keytool -genkeypair -v \
             -keystore "$MI_KEYSTORE_PATH" \
             -storepass "$MI_KEYSTORE_PASSWORD" \
@@ -83,86 +89,57 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Market Insight AI V2.1 CI, OU=Build, O=Market Insight AI, L=New York, ST=NY, C=US"
 
-      - name: Execute Build and Package APK
+      - name: Execute verify_release.sh
         shell: bash
         run: |
-          # Sanitize line endings (CRLF -> LF) for all shell scripts
-          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
-
-          WORKDIR="."
-          if [ -d "project" ]; then
-            WORKDIR="project"
+          if [ -d "project" ] && [ -f "project/scripts/verify_release.sh" ]; then
+            cd project
+            ./scripts/verify_release.sh
+          elif [ -f "scripts/verify_release.sh" ]; then
+            ./scripts/verify_release.sh
+          else
+            echo "Error: verify_release.sh script not found!"
+            exit 1
           fi
 
-          echo "Selected working directory: $WORKDIR"
-          mkdir -p "$WORKDIR/dist"
-          mkdir -p dist
-
-          # 1. Execute verify_release.sh if present
-          if [ -f "$WORKDIR/scripts/verify_release.sh" ]; then
-            echo "Running $WORKDIR/scripts/verify_release.sh..."
-            chmod +x "$WORKDIR/scripts/verify_release.sh"
-            cd "$WORKDIR"
-            ./scripts/verify_release.sh || true
-            cd "$GITHUB_WORKSPACE"
-          elif [ -f "./scripts/verify_release.sh" ]; then
-            echo "Running ./scripts/verify_release.sh..."
-            chmod +x "./scripts/verify_release.sh"
-            ./scripts/verify_release.sh || true
+      - name: Confirm real APK build outputs
+        shell: bash
+        run: |
+          TARGET_DIR="dist"
+          if [ -d "project/dist" ]; then
+            TARGET_DIR="project/dist"
           fi
 
-          # 2. Build via Gradle if Android project exists
-          if [ -f "$WORKDIR/android/gradlew" ]; then
-            echo "Building via $WORKDIR/android/gradlew..."
-            chmod +x "$WORKDIR/android/gradlew"
-            cd "$WORKDIR/android"
-            ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug || true
-            cd "$GITHUB_WORKSPACE"
-            cp "$WORKDIR/android/app/build/outputs/apk/debug/"*.apk "$WORKDIR/dist/MarketInsightAI-debug.apk" 2>/dev/null || true
-            cp "$WORKDIR/android/app/build/outputs/apk/release/"*.apk "$WORKDIR/dist/MarketInsightAI-v2.1.apk" 2>/dev/null || true
-          elif [ -f "android/gradlew" ]; then
-            echo "Building via android/gradlew..."
-            chmod +x "android/gradlew"
-            cd android
-            ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug || true
-            cd "$GITHUB_WORKSPACE"
-            cp android/app/build/outputs/apk/debug/*.apk dist/MarketInsightAI-debug.apk 2>/dev/null || true
-            cp android/app/build/outputs/apk/release/*.apk dist/MarketInsightAI-v2.1.apk 2>/dev/null || true
-          fi
+          echo "Checking APKs in $TARGET_DIR..."
+          ls -lh "$TARGET_DIR"
 
-          # 3. Ensure target APK files exist in dist directories
-          for TARGET_DIR in "$WORKDIR/dist" "dist" "project/dist"; do
-            mkdir -p "$TARGET_DIR"
-            if [ ! -f "$TARGET_DIR/MarketInsightAI-v2.1.apk" ]; then
-              if [ -f "$TARGET_DIR/MarketInsightAI-debug.apk" ]; then
-                cp "$TARGET_DIR/MarketInsightAI-debug.apk" "$TARGET_DIR/MarketInsightAI-v2.1.apk"
-              else
-                echo "MarketInsight AI V2.1 Build Package" > "$TARGET_DIR/MarketInsightAI-v2.1.apk"
-                echo "MarketInsight AI Debug Package" > "$TARGET_DIR/MarketInsightAI-debug.apk"
+          # Verify that files exist and are REAL binaries (>100KB)
+          FOUND_APK=0
+          for apk in "$TARGET_DIR"/*.apk; do
+            if [ -f "$apk" ]; then
+              SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
+              echo "Found $apk - Size: $SIZE bytes"
+              if [ "$SIZE" -lt 100000 ]; then
+                echo "ERROR: $apk is too small ($SIZE bytes). It is not a real APK!"
+                exit 1
               fi
+              FOUND_APK=1
             fi
-            if [ ! -f "$TARGET_DIR/MarketInsightAI-debug.apk" ]; then
-              cp "$TARGET_DIR/MarketInsightAI-v2.1.apk" "$TARGET_DIR/MarketInsightAI-debug.apk"
-            fi
-            cd "$TARGET_DIR"
-            sha256sum *.apk > SHA256SUMS.txt 2>/dev/null || true
-            cd "$GITHUB_WORKSPACE"
           done
 
-      - name: Confirm Build Artifacts
-        shell: bash
-        run: |
-          echo "=== Root dist directory ==="
-          ls -lh dist/ 2>/dev/null || true
-          if [ -d "project/dist" ]; then
-            echo "=== Project dist directory ==="
-            ls -lh project/dist/ 2>/dev/null || true
+          if [ "$FOUND_APK" -eq 0 ]; then
+            echo "ERROR: No .apk files generated!"
+            exit 1
           fi
 
-      - name: Upload APK Artifacts
+          cd "$TARGET_DIR"
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MarketInsightAI-v2.1-APK-Release
+          name: MarketInsightAI-v2.1-APK
           path: |
             project/dist/*.apk
             project/dist/SHA256SUMS.txt
