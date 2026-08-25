@@ -66,12 +66,24 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build Android APK
+        shell: bash
         run: |
-          chmod +x gradlew || true
-          if [ -f "gradlew" ]; then
+          # Find where gradlew is located and execute assembleRelease
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleRelease
+          elif [ -f "./project/android/gradlew" ]; then
+            cd project/android
+            chmod +x ./gradlew
+            ./gradlew assembleRelease
+          elif [ -f "./android/gradlew" ]; then
+            cd android
+            chmod +x ./gradlew
             ./gradlew assembleRelease
           else
-            echo "Gradle wrapper not found, skipping build step for now."
+            echo "Searching for build.gradle..."
+            find . -name "build.gradle"
+            exit 1
           fi
 
       - name: Upload APK Artifact
@@ -79,6 +91,5 @@ jobs:
         with:
           name: MarketInsightAI-V2.1-Release
           path: |
-            app/build/outputs/apk/release/*.apk
             **/build/outputs/apk/release/*.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
