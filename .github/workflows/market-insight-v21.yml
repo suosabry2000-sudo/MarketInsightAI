@@ -56,15 +56,29 @@ jobs:
           print("FULL STOCK UNIVERSE VERIFIED")
           PY
 
-      - name: Unpack V2.1 Android source
-        shell: bash
-        run: |
-          python - <<'PY'
-          import base64
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-          b64_data = "UEsDBBQAAAAIACAZGV1uBSGqsAMAAA4JAAAlAAAALmdpdGh1Yi93b3JrZmxvd3MvYW5kcm9pZC1yZWxlYXNlLnltbKVW227iSBB95ytK0WjyQtshmdtaihSHMIk3V2GYUTQ7shrcQAfT7u2LWXYy/77lNskaE7IjLQ9guk+dOlXUBUEXLIBTy7MUrqmaMwOR0Hw6MxBGEN5dtlq5CFoAy1zNJ1m+TFKuJTXjWXrorXafACNFxXjGdADfYEG5aOO7Nky1YcKosYr5imWMakaonMN3Z5tliWJ/WqZN0GpJphZca54LXTKOc2GYMMinGE1brYd85M4LpvhkRahIyagUXXlXVmiCOsGOrDCWZNQqq7syfMFya8iCC2tKfUcH7pyJorIFuI6Sy959PLjt95K7cHARwJsfP2DKzcyOvDJuDHjM4OdPH92qnKf+mJN1ON7DXL9IE8dfb/tnASB04fJKeJVXcnhw+GHDJAmvojAOYBO3CflVwrB/2Rsk0U0cnV8MkvAuSk7DuJcM+1dVVAVV2nsFBY+PsD8zRurA9xt+qOREqjy1Y4M/k2elpyjPlnTlUSn9fUzQyyq+xr8gogZyGpb6/yj4fNs/jc7OejdJ3Ov20c2X8GrYiyv3mo0VM9oL77qhC36NwTwjQ7sO+dzvnTnIC3eD28tn/tKzc401L/VTYRGwuiw56uRqHxtkPMdiPCnetZ4hwnVgjI1nJfxOCwqdj+tLaNhrZqwkD4gpGZ4wSyzU4PkbADaoUXxkS5sADFtYxUXtvrQn2Efa3e93Pu7vEHOuaJox+OT91tAzdRf+pqzq8DVhFaLmGpl3+Q6rToP47LKZjOqGbHpfn54URzsI71ZmlotXEysd5KR4vzOCClGL4MjrHG2FgAPU0CyDER3PmUihnEWQMonPTIw508+MOLeCNSmQBUguga+NCbGyTBhzp2/f7oIx2Pf8tadvKSu+b8k5Z4IpHIjQjQDbSHAxhTlbaZMrtqnksRYqIkyeo4MpE/gsKVdACvijBkEXTzyw96Y5RfeaWAeUVOstcDXatgxoxum/4GpKboGcthrnbjpE0mwK/TisdPO/GRwevPuEYaGnlJsVdA7w1bRLyzTCXvfmeHtBdqM23A6P3f7Ep21EG66Ob9gS7nGNtCEeHN/ct6F7PIz3mj/TF7fZyvIGt9nK5duoFM/XY8Wl0X61BpOnJaRnTbahzHLqOIAqwydY6XpH8VsHJU+w1zq44q6CXMcYRqTo1FuEoslGJVUTyW9apWxkpzi35/8NLTrewcvI+CI8fP8hHl7HnvnL1O75hIicTHjGNJnkVqQBMKVyVYPgEMd/GJgCktIV5qPzrvUPUEsDBBQAAAAIAOMCGV3Hn+pzagAAAI0AAAAKAAAALmdpdGln"
-          with open("/tmp/release.b64", "w") as f:
-              f.write(b64_data)
-          print("Base64 string normalized and written.")
-          PY
-          base64 -d /tmp/release.b64 > .github/workflows/android-release.yml
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Android APK
+        run: |
+          chmod +x gradlew || true
+          if [ -f "gradlew" ]; then
+            ./gradlew assembleRelease
+          else
+            echo "Gradle wrapper not found, skipping build step for now."
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MarketInsightAI-V2.1-Release
+          path: |
+            app/build/outputs/apk/release/*.apk
+            **/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
