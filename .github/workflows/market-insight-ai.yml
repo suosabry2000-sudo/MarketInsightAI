@@ -1,25 +1,34 @@
-name: Market Insight AI V2.1 Build Now (Web to APK)
+name: Market Insight AI V2.1 Build Now
 
 on:
-  workflow_dispatch: # Allows you to run this manually from the GitHub app on your phone
+  workflow_dispatch: # Run this manually from your phone in the GitHub App
 
 permissions:
   contents: read
 
 jobs:
-  build-apk:
+  verify-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    
+    env:
+      # Keystore setup for APK signing
+      MI_KEYSTORE_PATH: ${{ github.workspace }}/project/android/ci-release.jks
+      MI_KEYSTORE_PASSWORD: ci-market-insight-2026
+      MI_KEY_ALIAS: market-insight
+      MI_KEY_PASSWORD: ci-market-insight-2026
+      
+      # Backend API Endpoints
+      MARKET_INSIGHT_API_BASE_URL: https://market-insight-api-v21-production.up.railway.app/
+      MARKET_INSIGHT_WS_BASE_URL: wss://market-insight-api-v21-production.up.railway.app/
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
-          cache: 'npm'
+          python-version: '3.13'
 
       - name: Setup Java (Required for Android build)
         uses: actions/setup-java@v3
@@ -27,37 +36,65 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-
-      # Assuming you have a standard React/Vite app at the root
-      - name: Install Web Dependencies
-        run: npm ci
-
-      - name: Build Web App
-        run: npm run build
-        
-      # Using Capacitor to package the web build into an Android App
-      # (Make sure @capacitor/core, @capacitor/cli, and @capacitor/android are in your package.json)
-      - name: Sync Capacitor Android
+      - name: Verify V2.1 full stock universe
+        shell: bash
         run: |
-          npx cap add android || true
-          npx cap sync android
+          python - <<'PY'
+          import json, urllib.request, urllib.parse
 
-      - name: Build APK via Gradle
-        working-directory: android
-        run: ./gradlew assembleDebug
+          base = "https://market-insight-api-v21-production.up.railway.app"
+
+          with urllib.request.urlopen(base + "/health", timeout=30) as r:
+              health = json.load(r)
+          print("Health:", health)
+          if health.get("status") != "ok":
+              raise SystemExit("V2.1 backend health check failed")
+          PY
+
+      - name: Install backend test dependencies
+        working-directory: project
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e './backend[dev]'
+
+      - name: Generate CI signing keystore
+        shell: bash
+        run: |
+          # Ensure the directory exists before generating the keystore
+          mkdir -p ${{ github.workspace }}/project/android
+          
+          keytool -genkeypair -v \
+            -keystore "$MI_KEYSTORE_PATH" \
+            -storepass "$MI_KEYSTORE_PASSWORD" \
+            -alias "$MI_KEY_ALIAS" \
+            -keypass "$MI_KEY_PASSWORD" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Market Insight AI V2.1 CI, OU=Build, O=Market Insight AI, L=New York, ST=NY, C=US"
+
+      - name: Verify and build V2.1
+        working-directory: project
+        shell: bash
+        run: |
+          chmod +x ./scripts/verify_release.sh
+          ./scripts/verify_release.sh
 
       - name: Confirm APK outputs
         shell: bash
         run: |
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          echo "=== V2.1 APK Successfully Generated ==="
-          ls -lh app/build/outputs/apk/debug/
+          test -s project/dist/MarketInsightAI-v2.1.apk
+          test -s project/dist/MarketInsightAI-debug.apk
+          test -s project/dist/SHA256SUMS.txt
+          echo "=== V2.1 APKs Successfully Generated ==="
+          ls -lh project/dist/
+          cat project/dist/SHA256SUMS.txt
 
-      - name: Upload V2.1 APK Artifact
+      - name: Upload V2.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: MarketInsightAI-v2.1-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: MarketInsightAI-v2.1-full-universe
+          path: |
+            project/dist/MarketInsightAI-v2.1.apk
+            project/dist/MarketInsightAI-debug.apk
+            project/dist/SHA256SUMS.txt
           retention-days: 7
