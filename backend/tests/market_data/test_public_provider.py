@@ -86,3 +86,40 @@ def test_production_validation_allows_yahoo_without_alpaca_credentials():
         TOKEN_SECRET="x" * 32,
     )
     assert settings.validate_production() is settings
+
+
+@pytest.mark.asyncio
+async def test_yahoo_provider_bulk_quotes_use_single_spark_request_for_multiple_symbols():
+    from app.market_data.yahoo_provider import YahooMarketDataProvider
+
+    calls = []
+
+    def handler(req: httpx.Request):
+        calls.append(str(req.url))
+        assert req.url.path == "/v7/finance/spark"
+        return httpx.Response(
+            200,
+            json={
+                "spark": {
+                    "result": [
+                        {
+                            "symbol": "AAPL",
+                            "response": [{"meta": {"currency": "USD", "regularMarketPrice": 310.0, "chartPreviousClose": 300.0, "regularMarketTime": 1787605200}}],
+                        },
+                        {
+                            "symbol": "MSFT",
+                            "response": [{"meta": {"currency": "USD", "regularMarketPrice": 500.0, "chartPreviousClose": 490.0, "regularMarketTime": 1787605200}}],
+                        },
+                    ]
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = YahooMarketDataProvider(client=client, sec_user_agent="MarketInsightAI test@example.com")
+        quotes = await provider.get_quotes(["AAPL", "MSFT"])
+
+    assert len(calls) == 1
+    assert quotes["AAPL"].price == pytest.approx(310.0)
+    assert quotes["MSFT"].price == pytest.approx(500.0)
+    assert quotes["AAPL"].change_pct == pytest.approx((310.0 - 300.0) / 300.0 * 100.0)

@@ -26,6 +26,7 @@ class Quote(BaseModel):
     feed_scope: str
     feed_label: str | None = None
     consolidated: bool = False
+    change_pct: float | None = None
 
 
 class PriceBar(BaseModel):

@@ -36,6 +36,22 @@ def _utc_from_epoch(value: Any) -> datetime:
     return datetime.fromtimestamp(float(value), tz=timezone.utc)
 
 
+def _asset_type(company: str) -> str:
+    name = company.lower()
+    fund_markers = (" etf", "exchange traded fund", "ishares", "spdr ", "vanguard ", "vaneck ", "proshares ", "direxion ", "invesco ")
+    return "ETF" if any(marker in name for marker in fund_markers) else "STOCK"
+
+
+def _market_change_pct(price: float, previous_close: Any) -> float | None:
+    try:
+        prev = float(previous_close)
+    except (TypeError, ValueError):
+        return None
+    if prev <= 0:
+        return None
+    return (price - prev) / prev * 100.0
+
+
 class YahooMarketDataProvider:
     """No-key public fallback market provider.
 
@@ -101,7 +117,72 @@ class YahooMarketDataProvider:
             feed_scope=self.feed_scope,
             feed_label=self.feed_label,
             consolidated=False,
+            change_pct=_market_change_pct(float(price), meta.get("chartPreviousClose") or meta.get("previousClose")),
         )
+
+    async def get_quotes(self, tickers: list[str]) -> dict[str, Quote]:
+        symbols = list(dict.fromkeys(x.upper().strip() for x in tickers if x.strip()))
+        now = datetime.now(timezone.utc)
+        semaphore = asyncio.Semaphore(6)
+
+        async def fetch_chunk(chunk: list[str]) -> dict[str, Quote]:
+            async with semaphore:
+                try:
+                    response = await self._client.get(
+                        "https://query1.finance.yahoo.com/v7/finance/spark",
+                        params={"symbols": ",".join(chunk), "range": "1d", "interval": "1d", "includePrePost": "true"},
+                        headers={"User-Agent": "Mozilla/5.0 MarketInsightAI/1.0"},
+                    )
+                    response.raise_for_status()
+                    results = ((response.json() or {}).get("spark") or {}).get("result") or []
+                except Exception:
+                    return {}
+
+            chunk_quotes: dict[str, Quote] = {}
+            for result in results:
+                symbol = str(result.get("symbol") or "").upper()
+                responses = result.get("response") or []
+                if not symbol or not responses:
+                    continue
+                meta = responses[0].get("meta") or {}
+                price = meta.get("regularMarketPrice")
+                if price is None:
+                    closes = (((responses[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or [])
+                    closes = [x for x in closes if x is not None]
+                    price = closes[-1] if closes else None
+                if price is None:
+                    continue
+                market_time = meta.get("regularMarketTime")
+                pts = _utc_from_epoch(market_time) if market_time else now
+                chunk_quotes[symbol] = Quote(
+                    ticker=symbol, price=float(price), currency=str(meta.get("currency") or "USD"), provider="yahoo",
+                    provider_timestamp=pts, normalized_timestamp=now, market_session=_session(now),
+                    freshness_seconds=max(0.0, (now - pts).total_seconds()), data_quality=self.quality,
+                    feed_scope=self.feed_scope, feed_label=self.feed_label, consolidated=False,
+                    change_pct=_market_change_pct(float(price), meta.get("chartPreviousClose") or meta.get("previousClose")),
+                )
+            return chunk_quotes
+
+        chunks = [symbols[i:i + 50] for i in range(0, len(symbols), 50)]
+        output: dict[str, Quote] = {}
+        for part in await asyncio.gather(*(fetch_chunk(chunk) for chunk in chunks)):
+            output.update(part)
+
+        missing = [symbol for symbol in symbols if symbol not in output]
+        fallback_semaphore = asyncio.Semaphore(8)
+
+        async def fallback(symbol: str):
+            async with fallback_semaphore:
+                try:
+                    return symbol, await self.get_quote(symbol)
+                except Exception:
+                    return symbol, None
+
+        if missing:
+            for symbol, quote in await asyncio.gather(*(fallback(symbol) for symbol in missing)):
+                if quote is not None:
+                    output[symbol] = quote
+        return output
 
     async def get_bars(self, ticker: str, timeframe: str, limit: int) -> list[PriceBar]:
         if limit <= 0:
@@ -193,7 +274,7 @@ class YahooMarketDataProvider:
             if not ticker or not company or exchange not in allowed or ticker in seen:
                 continue
             seen.add(ticker)
-            out.append({"ticker": ticker, "company": company, "exchange": exchange, "sector": None})
+            out.append({"ticker": ticker, "company": company, "exchange": exchange, "sector": None, "asset_type": _asset_type(company)})
         return sorted(out, key=lambda item: item["ticker"])
 
     async def stream_quotes(self, tickers: list[str]) -> AsyncIterator[Quote]:

@@ -79,3 +79,58 @@ def test_stock_catalog_pages_through_large_provider_universe():
         assert body['results'][0]['ticker'] == 'T0100'
         assert body['results'][-1]['ticker'] == 'T0299'
         assert body['has_more'] is True
+
+
+def test_stock_catalog_can_sort_by_latest_price_and_keep_missing_prices_last():
+    from datetime import datetime, timezone
+    from app.domain.models import DataQuality, Quote
+
+    class PricedCatalogProvider(FakeMarketDataProvider):
+        async def list_assets(self):
+            return [
+                {"ticker":"AAA","company":"Alpha","exchange":"NYSE","sector":"Technology","asset_type":"STOCK"},
+                {"ticker":"BBB","company":"Beta","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK"},
+                {"ticker":"CCC","company":"Gamma","exchange":"NYSE","sector":"Financial","asset_type":"STOCK"},
+                {"ticker":"MISS","company":"Missing","exchange":"NYSE","sector":"Technology","asset_type":"STOCK"},
+            ]
+
+        async def get_quotes(self, tickers):
+            now=datetime.now(timezone.utc)
+            prices={"AAA":10.0,"BBB":30.0,"CCC":20.0}
+            return {
+                ticker: Quote(
+                    ticker=ticker, price=prices[ticker], provider="test", provider_timestamp=now,
+                    normalized_timestamp=now, market_session="OPEN", freshness_seconds=0,
+                    data_quality=DataQuality.VERIFIED, feed_scope="TEST", feed_label="Test feed", consolidated=True,
+                )
+                for ticker in tickers if ticker in prices
+            }
+
+    with TestClient(create_app(provider=PricedCatalogProvider())) as c:
+        r=c.get('/stocks/catalog?sort=price&direction=desc&limit=10')
+        assert r.status_code==200
+        body=r.json()
+        assert [x['ticker'] for x in body['results']]==['BBB','CCC','AAA','MISS']
+        assert [x['price'] for x in body['results'][:3]]==[30.0,20.0,10.0]
+        assert body['results'][-1]['price'] is None
+        assert body['results'][-1]['price_status']=='UNAVAILABLE'
+
+        r=c.get('/stocks/catalog?sort=price&direction=asc&exchange=NYSE&sector=Technology&limit=10')
+        assert r.status_code==200
+        assert [x['ticker'] for x in r.json()['results']]==['AAA','MISS']
+
+
+def test_stock_catalog_filters_search_and_asset_type_before_paging():
+    class FilterCatalogProvider(FakeMarketDataProvider):
+        async def list_assets(self):
+            return [
+                {"ticker":"AAPL","company":"Apple Inc.","exchange":"NASDAQ","sector":"Technology","asset_type":"STOCK"},
+                {"ticker":"GLD","company":"SPDR Gold Shares","exchange":"NYSE","sector":None,"asset_type":"ETF"},
+                {"ticker":"GOLD","company":"Barrick Mining Corporation","exchange":"NYSE","sector":"Materials","asset_type":"STOCK"},
+            ]
+
+    with TestClient(create_app(provider=FilterCatalogProvider())) as c:
+        r=c.get('/stocks/catalog?q=gold&asset_type=STOCK&limit=10')
+        assert r.status_code==200
+        assert r.json()['total']==1
+        assert r.json()['results'][0]['ticker']=='GOLD'
