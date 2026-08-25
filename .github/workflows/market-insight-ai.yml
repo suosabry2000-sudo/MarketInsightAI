@@ -1,7 +1,7 @@
 name: Market Insight AI V2.1 Build Now
 
 on:
-  workflow_dispatch: # Trigger manually from your phone via GitHub Mobile App
+  workflow_dispatch: # Trigger manually from your phone via the GitHub mobile app
 
 permissions:
   contents: read
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      MI_KEYSTORE_PATH: ${{ github.workspace }}/project/android/ci-release.jks
+      MI_KEYSTORE_PATH: ${{ github.workspace }}/ci-release.jks
       MI_KEYSTORE_PASSWORD: ci-market-insight-2026
       MI_KEY_ALIAS: market-insight
       MI_KEY_PASSWORD: ci-market-insight-2026
@@ -39,12 +39,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - name: Inspect Repository Structure
+      - name: Inspect Workspace Structure
         shell: bash
         run: |
-          echo "=== Repository Directory Structure ==="
+          echo "=== Root Repository Layout ==="
+          ls -la
+          echo "=== Searching for project build files ==="
           find . -maxdepth 3 -not -path '*/.*'
 
       - name: Test Backend Health
@@ -65,25 +67,27 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          # Install from any directory that contains setup.py or requirements.txt
-          SETUP_PY=$(find . -name "setup.py" -o -name "pyproject.toml" | head -n 1)
-          if [ -n "$SETUP_PY" ]; then
-            SETUP_DIR=$(dirname "$SETUP_PY")
-            echo "Installing Python dependencies from $SETUP_DIR..."
-            cd "$SETUP_DIR"
+          
+          # Install dependencies dynamically whether at root or in a subfolder
+          if [ -d "project" ] && [ -f "project/setup.py" ]; then
+            python -m pip install -e './project/backend[dev]' 2>/dev/null || python -m pip install -e './project' 2>/dev/null || true
+          elif [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
             python -m pip install -e './backend[dev]' 2>/dev/null || python -m pip install -e '.' 2>/dev/null || true
-            cd "$GITHUB_WORKSPACE"
           fi
-          REQ_TXT=$(find . -name "requirements.txt" | head -n 1)
-          if [ -n "$REQ_TXT" ]; then
-            python -m pip install -r "$REQ_TXT" 2>/dev/null || true
+
+          if [ -f "project/requirements.txt" ]; then
+            python -m pip install -r project/requirements.txt 2>/dev/null || true
+          elif [ -f "requirements.txt" ]; then
+            python -m pip install -r requirements.txt 2>/dev/null || true
           fi
 
       - name: Generate CI Signing Keystore
         shell: bash
         run: |
-          mkdir -p "${{ github.workspace }}/project/android"
           mkdir -p "${{ github.workspace }}/android"
+          if [ -d "${{ github.workspace }}/project" ]; then
+            mkdir -p "${{ github.workspace }}/project/android"
+          fi
           keytool -genkeypair -v \
             -keystore "$MI_KEYSTORE_PATH" \
             -storepass "$MI_KEYSTORE_PASSWORD" \
@@ -95,22 +99,22 @@ jobs:
       - name: Locate and Execute Build Script
         shell: bash
         run: |
-          # Sanitize line endings across all shell scripts in the repo
+          # Convert Windows CRLF line endings to Linux LF across all scripts
           find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
-          # Dynamically locate verify_release.sh anywhere in the repo
+          # Search for verify_release.sh anywhere in the repo
           SCRIPT_PATH=$(find . -name "verify_release.sh" -type f | head -n 1)
 
           if [ -n "$SCRIPT_PATH" ]; then
-            echo "Found release script at: $SCRIPT_PATH"
+            echo "Found verify_release.sh at: $SCRIPT_PATH"
             chmod +x "$SCRIPT_PATH"
             
-            # Determine directory where scripts/ folder lives
+            # Navigate to the parent folder of scripts/ and run verify_release.sh
             SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-            WORKING_DIR=$(dirname "$SCRIPT_DIR")
+            PARENT_DIR=$(dirname "$SCRIPT_DIR")
             
-            echo "Executing script in working directory: $WORKING_DIR"
-            cd "$WORKING_DIR"
+            echo "Changing directory to $PARENT_DIR and running verify_release.sh..."
+            cd "$PARENT_DIR"
             ./scripts/verify_release.sh
             cd "$GITHUB_WORKSPACE"
 
@@ -119,47 +123,47 @@ jobs:
             GRADLE_PATH=$(find . -name "gradlew" -type f | head -n 1)
             
             if [ -n "$GRADLE_PATH" ]; then
-              echo "Found Gradle wrapper at: $GRADLE_PATH"
+              echo "Found gradlew at: $GRADLE_PATH"
               chmod +x "$GRADLE_PATH"
               GRADLE_DIR=$(dirname "$GRADLE_PATH")
               cd "$GRADLE_DIR"
               ./gradlew assembleDebug assembleRelease || ./gradlew assembleDebug
               cd "$GITHUB_WORKSPACE"
             else
-              echo "ERROR: Neither verify_release.sh nor gradlew was found in the repository!"
+              echo "ERROR: Neither verify_release.sh nor gradlew found in repository!"
               exit 1
             fi
           fi
 
-      - name: Collect and Verify APK Outputs
+      - name: Collect and Verify APK Artifacts
         shell: bash
         run: |
           mkdir -p dist
 
-          echo "Searching for built .apk files..."
+          echo "Searching for generated APK files..."
           APK_FILES=$(find . -name "*.apk" -type f -not -path '*/.*')
 
           if [ -z "$APK_FILES" ]; then
-            echo "ERROR: No .apk files were produced by the build step!"
+            echo "ERROR: No .apk files were produced during the build step!"
             exit 1
           fi
 
           echo "Found APK files:"
           echo "$APK_FILES"
 
-          # Copy found APKs into the root dist/ directory
+          # Copy found APKs into root dist/ folder
           for apk in $APK_FILES; do
             echo "Copying $apk to dist/"
             cp "$apk" dist/ 2>/dev/null || true
           done
 
-          # Validate APK file sizes (must be a real binary > 100KB)
+          # Validate APK binary sizes (>100KB)
           for apk in dist/*.apk; do
             if [ -f "$apk" ]; then
               SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
               echo "$apk - Size: $SIZE bytes"
               if [ "$SIZE" -lt 100000 ]; then
-                echo "ERROR: $apk is too small ($SIZE bytes). It is not a valid Android package!"
+                echo "ERROR: $apk is too small ($SIZE bytes). It is not a valid compiled APK!"
                 exit 1
               fi
             fi
@@ -167,7 +171,7 @@ jobs:
 
           cd dist
           sha256sum *.apk > SHA256SUMS.txt
-          echo "=== Final Build Artifacts ==="
+          echo "=== Final APK Build Outputs ==="
           ls -lh
           cat SHA256SUMS.txt
 
