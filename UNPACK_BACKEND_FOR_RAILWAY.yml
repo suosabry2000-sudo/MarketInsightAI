@@ -1,0 +1,39 @@
+name: Unpack Backend for Railway
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify backend archive exists
+        run: |
+          test -f MarketInsightAI_BACKEND_RAILWAY.zip
+          unzip -t MarketInsightAI_BACKEND_RAILWAY.zip
+
+      - name: Unpack backend source
+        run: |
+          rm -rf backend
+          unzip -q MarketInsightAI_BACKEND_RAILWAY.zip
+          test -f backend/pyproject.toml
+          test -f backend/app/main.py
+          test -f backend/Dockerfile
+
+      - name: Commit extracted backend
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend
+          if git diff --cached --quiet; then
+            echo "Backend already up to date."
+          else
+            git commit -m "deploy: unpack Market Insight AI backend for Railway"
+            git push
+          fi
