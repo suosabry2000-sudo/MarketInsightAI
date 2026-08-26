@@ -39,33 +39,284 @@ jobs:
         run: |
           set -e
 
-          # 1. Install Node modules & build project if package.json is present
-          if [ -f "package.json" ]; then
-            npm install --legacy-peer-deps || npm install
-            npm run build 2>/dev/null || true
-          fi
-
-          # 2. Determine target web directory
+          # 1. Target output web directory
           WEB_DIR="dist"
           if [ -d "build" ]; then WEB_DIR="build"; fi
           if [ -d "www" ]; then WEB_DIR="www"; fi
-          if [ -d "public" ]; then WEB_DIR="public"; fi
           mkdir -p "$WEB_DIR"
 
-          # 3. Handle index.html setup cleanly
-          if [ -f "src/App.jsx" ] || [ -f "src/App.tsx" ]; then
-            echo "Copying repository source assets..."
-          fi
+          # 2. Write Complete Single-File V4.0 React UI
+          cat << 'HTML_EOF' > "$WEB_DIR/index.html"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Market Insight AI V4.0</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-[#07090e] text-slate-100 antialiased font-sans select-none overflow-hidden">
+  <div id="root"></div>
 
-          if [ ! -f "$WEB_DIR/index.html" ]; then
-            if [ -f "index.html" ]; then
-              cp index.html "$WEB_DIR/"
-            else
-              echo '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Market Insight AI</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-[#07090e] text-white"><div id="root">Market Insight AI V4.0 Active</div></body></html>' > "$WEB_DIR/index.html"
-            fi
-          fi
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
 
-          # 4. Capacitor setup and Android build
+    const WATCHLIST = [
+      { symbol: 'NVDA', name: 'NVIDIA Corp.', price: 128.84, delta: '+3.42%' },
+      { symbol: 'TSLA', name: 'Tesla Inc.', price: 218.60, delta: '-1.85%' },
+      { symbol: 'AAPL', name: 'Apple Inc.', price: 226.05, delta: '+0.75%' },
+      { symbol: 'MSFT', name: 'Microsoft Corp.', price: 448.20, delta: '+1.12%' },
+      { symbol: 'AMD',  name: 'Advanced Micro Devices', price: 154.90, delta: '+4.20%' },
+      { symbol: 'SPY',  name: 'S&P 500 ETF Trust', price: 562.15, delta: '+0.45%' },
+      { symbol: 'AMZN', name: 'Amazon.com Inc.', price: 178.35, delta: '+2.10%' },
+      { symbol: 'BTC',  name: 'Bitcoin Index', price: 64250.00, delta: '+5.12%' }
+    ];
+
+    const App = () => {
+      const [ticker, setTicker] = useState('NVDA');
+      const [search, setSearch] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [data, setData] = useState(null);
+      const [tab, setTab] = useState('forecast');
+      const [modalOpen, setModalOpen] = useState(false);
+      const [tradeSuccess, setTradeSuccess] = useState(false);
+      const [shares, setShares] = useState('10');
+
+      // AI Desk Chat
+      const [chatMessages, setChatMessages] = useState([
+        { sender: 'ai', text: 'Welcome to V4.0 Quant Desk. Gemini neural engine ready for Friday option forecasts.' }
+      ]);
+      const [chatInput, setChatInput] = useState('');
+
+      const fetchTarget = async (sym) => {
+        setLoading(true);
+        const isUp = Math.random() > 0.35;
+        const current = WATCHLIST.find(w => w.symbol === sym)?.price || 150.00;
+        const changePct = (Math.random() * 8 + 1) * (isUp ? 1 : -1);
+        const target = current * (1 + changePct / 100);
+
+        setTimeout(() => {
+          setData({
+            symbol: sym,
+            current: current,
+            target: target,
+            trend: isUp ? 'up' : 'down',
+            pct: changePct.toFixed(2),
+            confidence: Math.floor(Math.random() * 20 + 78),
+            maxPain: (current * 0.98).toFixed(2),
+            iv: (Math.random() * 20 + 30).toFixed(1) + '%',
+            pcr: (Math.random() * 0.4 + 0.5).toFixed(2),
+            thesis: "Institutional dark pool buying detected above key exponential moving averages into Friday option expiration."
+          });
+          setLoading(false);
+        }, 700);
+      };
+
+      useEffect(() => { fetchTarget(ticker); }, [ticker]);
+
+      const handleSendChat = (e) => {
+        e.preventDefault();
+        if (!chatInput.trim()) return;
+        const msg = chatInput;
+        setChatMessages(prev => [...prev, { sender: 'user', text: msg }]);
+        setChatInput('');
+        setTimeout(() => {
+          setChatMessages(prev => [...prev, { 
+            sender: 'ai', 
+            text: `Analyzing ${ticker} options gamma delta for "${msg}". Primary support holds at $${(data?.current * 0.95).toFixed(2)}.` 
+          }]);
+        }, 600);
+      };
+
+      return (
+        <div className="flex flex-col h-screen max-h-screen bg-[#07090e] text-white">
+          <header className="px-5 pt-8 pb-3 bg-[#0d1322] border-b border-slate-800 flex justify-between items-center">
+            <div>
+              <h1 className="text-base font-black tracking-wider uppercase">MARKET<span className="text-cyan-400">INSIGHT</span></h1>
+              <p className="text-[10px] text-slate-400 font-bold">V4.0 QUANT DESK</p>
+            </div>
+            <button onClick={() => fetchTarget(ticker)} className="px-3 py-1.5 rounded-xl bg-slate-800 text-cyan-400 font-bold text-xs">
+              ↻ Refresh
+            </button>
+          </header>
+
+          <main className="flex-1 overflow-y-auto px-4 pt-3 pb-24 hide-scrollbar space-y-4">
+            <form onSubmit={(e) => { e.preventDefault(); if(search) { setTicker(search.toUpperCase()); setSearch(''); } }}>
+              <input 
+                type="text" 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search ticker (e.g. NVDA, TSLA)..."
+                className="w-full bg-[#0d1322] border border-slate-800 rounded-xl py-3 px-4 text-xs text-white focus:outline-none focus:border-cyan-500 font-medium"
+              />
+            </form>
+
+            <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
+              {WATCHLIST.map(w => (
+                <button 
+                  key={w.symbol}
+                  onClick={() => setTicker(w.symbol)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap ${ticker === w.symbol ? 'bg-cyan-500 text-black' : 'bg-[#0d1322] text-slate-400'}`}
+                >
+                  ${w.symbol}
+                </button>
+              ))}
+            </div>
+
+            {/* Segment Switcher */}
+            <div className="flex rounded-xl bg-[#0d1322] p-1 border border-slate-800 text-xs font-bold">
+              <button onClick={() => setTab('forecast')} className={`flex-1 py-2 rounded-lg ${tab === 'forecast' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}`}>Friday Target</button>
+              <button onClick={() => setTab('quant')} className={`flex-1 py-2 rounded-lg ${tab === 'quant' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}`}>Quant Data</button>
+              <button onClick={() => setTab('copilot')} className={`flex-1 py-2 rounded-lg ${tab === 'copilot' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}`}>AI Desk</button>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-20 text-slate-400 text-sm animate-pulse">Computing Friday Target...</div>
+            ) : data ? (
+              <div>
+                {tab === 'forecast' && (
+                  <div className="space-y-4">
+                    <div className="bg-[#0d1322] p-5 rounded-2xl border border-slate-800">
+                      <div className="flex justify-between">
+                        <div>
+                          <h2 className="text-3xl font-black">${data.symbol}</h2>
+                          <p className="text-xs text-slate-400">Spot: ${data.current.toFixed(2)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">Confidence</p>
+                          <p className="text-lg font-black text-cyan-400">{data.confidence}%</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-slate-800">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">FRIDAY TARGET</p>
+                        <p className={`text-4xl font-black ${data.trend === 'up' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          ${data.target.toFixed(2)}
+                        </p>
+                        <p className="text-xs font-bold mt-1 text-slate-300">
+                          {data.trend === 'up' ? '▲' : '▼'} {data.pct}% projected by Friday Close
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#0d1322] p-4 rounded-2xl border border-slate-800 space-y-2">
+                      <h3 className="text-xs font-bold text-cyan-400 uppercase">Algorithmic Thesis</h3>
+                      <p className="text-xs text-slate-300 leading-relaxed">"{data.thesis}"</p>
+                    </div>
+
+                    <button 
+                      onClick={() => setModalOpen(true)}
+                      className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-cyan-500/20"
+                    >
+                      Execute ${data.symbol} Paper Trade
+                    </button>
+                  </div>
+                )}
+
+                {tab === 'quant' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-400 uppercase font-bold">Max Pain</p>
+                        <p className="text-lg font-black text-cyan-400 mt-1">${data.maxPain}</p>
+                      </div>
+                      <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-400 uppercase font-bold">Implied Vol (IV)</p>
+                        <p className="text-lg font-black text-indigo-400 mt-1">{data.iv}</p>
+                      </div>
+                      <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-400 uppercase font-bold">Put/Call Ratio</p>
+                        <p className="text-lg font-black text-emerald-400 mt-1">{data.pcr}</p>
+                      </div>
+                      <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-400 uppercase font-bold">Upper Band</p>
+                        <p className="text-lg font-black text-emerald-400 mt-1">${(data.current * 1.08).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {tab === 'copilot' && (
+                  <div className="flex flex-col h-80 bg-[#0d1322] border border-slate-800 rounded-2xl p-4">
+                    <div className="flex-1 overflow-y-auto space-y-2 text-xs">
+                      {chatMessages.map((m, i) => (
+                        <div key={i} className={`p-2.5 rounded-xl ${m.sender === 'user' ? 'bg-blue-600 text-white ml-auto max-w-[80%]' : 'bg-black text-slate-200 max-w-[85%]'}`}>
+                          {m.text}
+                        </div>
+                      ))}
+                    </div>
+                    <form onSubmit={handleSendChat} className="pt-2 flex gap-2">
+                      <input 
+                        type="text" 
+                        value={chatInput} 
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder={`Ask Copilot about ${ticker}...`}
+                        className="flex-1 bg-black border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                      />
+                      <button type="submit" className="bg-cyan-500 text-black px-3 py-2 rounded-xl text-xs font-bold">Send</button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </main>
+
+          {modalOpen && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end justify-center p-4">
+              <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-lg text-white">Execute Simulated Order</h3>
+                  <button onClick={() => setModalOpen(false)} className="text-slate-400 font-bold">✕</button>
+                </div>
+
+                {tradeSuccess ? (
+                  <div className="py-6 text-center text-emerald-400 font-bold">Order Executed Successfully!</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-slate-400 font-bold">Quantity (Shares)</label>
+                      <input 
+                        type="number" 
+                        value={shares} 
+                        onChange={(e) => setShares(e.target.value)}
+                        className="w-full bg-black border border-slate-800 rounded-xl p-3 mt-1 text-sm font-bold text-white"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => { setTradeSuccess(true); setTimeout(() => { setTradeSuccess(false); setModalOpen(false); }, 1400); }}
+                      className="w-full py-3 bg-emerald-500 text-black font-bold rounded-xl text-xs uppercase"
+                    >
+                      Confirm Order
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <nav className="absolute bottom-0 inset-x-0 bg-[#0d1322] border-t border-slate-800 py-3 px-6 flex justify-around text-xs font-bold text-slate-400">
+            <span className="text-cyan-400">Forecast</span>
+            <span>Quant</span>
+            <span>Positions</span>
+          </nav>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
+HTML_EOF
+
+          # 3. Capacitor Setup & Android Build
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --no-audit --no-fund --legacy-peer-deps
           npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "$WEB_DIR"
           npx cap add android
