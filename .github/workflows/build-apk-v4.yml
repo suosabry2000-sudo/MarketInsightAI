@@ -1,7 +1,7 @@
 name: Market Insight AI V4 Build
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
     branches:
       - main
@@ -34,29 +34,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Scaffold & Assemble Android APK
+      - name: Build UI & Assemble Android Binary
         shell: bash
         run: |
           set -e
-          
-          # 1. Target Web Bundle Directory
-          WEB_DIR="dist"
-          if [ -d "build" ]; then WEB_DIR="build"; fi
-          if [ -d "www" ]; then WEB_DIR="www"; fi
-          mkdir -p "$WEB_DIR"
 
-          # 2. Build Web Bundle or generate self-contained HTML shell
-          if [ -f "package.json" ]; then
-            npm install --legacy-peer-deps || npm install
-            npm run build 2>/dev/null || true
-          fi
+          # 1. Prepare dist directory
+          mkdir -p dist
 
-          if [ -f "index.html" ]; then
-            echo "Found root index.html, deploying to web directory..."
-            cp index.html "$WEB_DIR/"
-          elif [ ! -f "$WEB_DIR/index.html" ]; then
-            echo "Generating production V4.0 Single-File Web Shell..."
-            cat << 'HTML_EOF' > "$WEB_DIR/index.html"
+          # 2. Bundle complete single-file V4.0 React UI
+          cat << 'EOF' > dist/index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -322,12 +309,11 @@ jobs:
   </script>
 </body>
 </html>
-HTML_EOF
-          fi
+EOF
 
           # 3. Capacitor Setup & Native APK Generation
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --no-audit --no-fund --legacy-peer-deps
-          npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "$WEB_DIR"
+          npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "dist"
           npx cap add android
           npx cap sync android
 
@@ -340,17 +326,7 @@ HTML_EOF
         run: |
           set -e
           mkdir -p release_binaries
-          APKS=$(find android/app/build/outputs/apk/ -type f -name "*.apk")
-
-          if [ -z "$APKS" ]; then
-            echo "No APK produced"
-            exit 1
-          fi
-
-          for apk in $APKS; do
-            cp "$apk" release_binaries/MarketInsightAI-v4.0.apk
-          done
-
+          cp android/app/build/outputs/apk/debug/*.apk release_binaries/MarketInsightAI-v4.0.apk
           cd release_binaries
           sha256sum *.apk > SHA256SUMS.txt
 
