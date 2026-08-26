@@ -1,7 +1,7 @@
 name: Market Insight AI V4.0 - Production APK Build
 
 on:
-  workflow_dispatch: # Allows 1-click trigger from GitHub Mobile app on your phone
+  workflow_dispatch: # Enables manual 1-click execution directly from the GitHub Mobile app
   push:
     branches:
       - main
@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-v4-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     env:
       APP_ID: 'com.marketinsight.ai'
@@ -61,20 +61,20 @@ jobs:
           echo "--> Inspecting workspace layout..."
           ls -la
 
-          # Build project if package.json exists
+          # Run npm build if package.json exists
           if [ -f "package.json" ]; then
             npm install --legacy-peer-deps
             npm run build 2>/dev/null || true
           fi
 
-          # Target output directory
+          # Target distribution directory resolution
           WEB_DIR="dist"
           if [ -d "build" ]; then WEB_DIR="build"; fi
           if [ -d "www" ]; then WEB_DIR="www"; fi
           if [ -d "public" ]; then WEB_DIR="public"; fi
           mkdir -p "$WEB_DIR"
 
-          # Guarantee index.html entry exists
+          # Ensure index.html exists
           if [ ! -f "$WEB_DIR/index.html" ]; then
             if [ -f "index.html" ]; then
               cp index.html "$WEB_DIR/"
@@ -113,11 +113,12 @@ EOF_HTML
           npx cap init "${{ env.APP_NAME }}" "${{ env.APP_ID }}" --web-dir "$WEB_DIR"
           npx cap add android
 
-          # Inject Java plugin into the Android project
+          # Inject Native Java Plugin into Android Source Tree
           PLUGIN_DIR="android/app/src/main/java/com/marketinsight/ai"
           mkdir -p "$PLUGIN_DIR"
           if [ -f "StockPredictorPlugin.java" ]; then
             cp StockPredictorPlugin.java "$PLUGIN_DIR/"
+            echo "Successfully injected StockPredictorPlugin.java into Android app package."
           fi
 
           npx cap sync android
@@ -129,7 +130,7 @@ EOF_HTML
 
           cd "$GITHUB_WORKSPACE"
 
-      - name: 8. Validate Binaries (>2MB Guardrail)
+      - name: 8. Validate Binaries (>2MB Guardrail Check)
         shell: bash
         run: |
           set -e
@@ -148,6 +149,7 @@ EOF_HTML
             FILE_SIZE=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
             echo "Binary: $FILE_NAME | Size: $FILE_SIZE bytes"
 
+            # Strict Guardrail: APK must be a real compiled binary (> 2 MB)
             if [ "$FILE_SIZE" -lt 2000000 ]; then
               echo "FATAL: $FILE_NAME failed binary size threshold ($FILE_SIZE bytes)."
               exit 1
