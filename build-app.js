@@ -83,7 +83,7 @@ const htmlContent = `<!DOCTYPE html>
         setTimeout(() => {
           setChatMessages(prev => [...prev, { 
             sender: 'ai', 
-            text: \`Analyzing \${ticker} options gamma delta for "\${msg}". Support floor stands at $\${(data?.current * 0.95).toFixed(2)}.\` 
+            text: "Analyzing " + ticker + " options gamma delta for \\"" + msg + "\\". Support floor stands at $" + (data?.current * 0.95).toFixed(2) + "." 
           }]);
         }, 500);
       };
@@ -116,17 +116,17 @@ const htmlContent = `<!DOCTYPE html>
                 <button 
                   key={w.symbol}
                   onClick={() => setTicker(w.symbol)}
-                  className={\`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap \${ticker === w.symbol ? 'bg-cyan-500 text-black' : 'bg-[#0d1322] text-slate-400'}\`}
+                  className={"px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap " + (ticker === w.symbol ? 'bg-cyan-500 text-black' : 'bg-[#0d1322] text-slate-400')}
                 >
-                  ${w.symbol}
+                  ${"{"}w.symbol{"}"}
                 </button>
               ))}
             </div>
 
             <div className="flex rounded-xl bg-[#0d1322] p-1 border border-slate-800 text-xs font-bold">
-              <button onClick={() => setTab('forecast')} className={\`flex-1 py-2 rounded-lg \${tab === 'forecast' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}\`}>Friday Target</button>
-              <button onClick={() => setTab('quant')} className={\`flex-1 py-2 rounded-lg \${tab === 'quant' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}\`}>Quant Data</button>
-              <button onClick={() => setTab('copilot')} className={\`flex-1 py-2 rounded-lg \${tab === 'copilot' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400'}\`}>AI Desk</button>
+              <button onClick={() => setTab('forecast')} className={"flex-1 py-2 rounded-lg " + (tab === 'forecast' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400')}>Friday Target</button>
+              <button onClick={() => setTab('quant')} className={"flex-1 py-2 rounded-lg " + (tab === 'quant' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400')}>Quant Data</button>
+              <button onClick={() => setTab('copilot')} className={"flex-1 py-2 rounded-lg " + (tab === 'copilot' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400')}>AI Desk</button>
             </div>
 
             {loading ? (
@@ -138,36 +138,36 @@ const htmlContent = `<!DOCTYPE html>
                     <div className="bg-[#0d1322] p-5 rounded-2xl border border-slate-800">
                       <div className="flex justify-between">
                         <div>
-                          <h2 className="text-3xl font-black">\${data.symbol}</h2>
-                          <p className="text-xs text-slate-400">Spot: \${data.current.toFixed(2)}</p>
+                          <h2 className="text-3xl font-black">${"{"}data.symbol{"}"}</h2>
+                          <p className="text-xs text-slate-400">Spot: ${"{"}data.current.toFixed(2){"}"}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-slate-400 font-bold uppercase">Confidence</p>
-                          <p className="text-lg font-black text-cyan-400">{data.confidence}%</p>
+                          <p className="text-lg font-black text-cyan-400">{"{"}data.confidence{"}"}%</p>
                         </div>
                       </div>
 
                       <div className="mt-4 pt-4 border-t border-slate-800">
                         <p className="text-[10px] font-bold text-slate-400 uppercase">FRIDAY TARGET</p>
-                        <p className={\`text-4xl font-black \${data.trend === 'up' ? 'text-emerald-400' : 'text-rose-400'}\`}>
-                          \${data.target.toFixed(2)}
+                        <p className={"text-4xl font-black " + (data.trend === 'up' ? 'text-emerald-400' : 'text-rose-400')}>
+                          ${"{"}data.target.toFixed(2){"}"}
                         </p>
                         <p className="text-xs font-bold mt-1 text-slate-300">
-                          {data.trend === 'up' ? '▲' : '▼'} {data.pct}% projected by Friday Close
+                          {"{"}data.trend === 'up' ? '▲' : '▼'{"}"} {"{"}data.pct{"}"}% projected by Friday Close
                         </p>
                       </div>
                     </div>
 
                     <div className="bg-[#0d1322] p-4 rounded-2xl border border-slate-800 space-y-2">
                       <h3 className="text-xs font-bold text-cyan-400 uppercase">Algorithmic Thesis</h3>
-                      <p className="text-xs text-slate-300 leading-relaxed">"{data.thesis}"</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">"{"{"}data.thesis{"}"}"</p>
                     </div>
 
                     <button 
                       onClick={() => setModalOpen(true)}
                       className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-sm uppercase tracking-wider shadow-lg shadow-cyan-500/20"
                     >
-                      Execute \${data.symbol} Paper Trade
+                      Execute ${"{"}data.symbol{"}"} Paper Trade
                     </button>
                   </div>
                 )}
@@ -177,19 +177,19 @@ const htmlContent = `<!DOCTYPE html>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
                         <p className="text-[10px] text-slate-400 uppercase font-bold">Max Pain</p>
-                        <p className="text-lg font-black text-cyan-400 mt-1">\${data.maxPain}</p>
+                        <p className="text-lg font-black text-cyan-400 mt-1">${"{"}data.maxPain{"}"}</p>
                       </div>
                       <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
                         <p className="text-[10px] text-slate-400 uppercase font-bold">Implied Vol (IV)</p>
-                        <p className="text-lg font-black text-indigo-400 mt-1">{data.iv}</p>
+                        <p className="text-lg font-black text-indigo-400 mt-1">{"{"}data.iv{"}"}</p>
                       </div>
                       <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
                         <p className="text-[10px] text-slate-400 uppercase font-bold">Put/Call Ratio</p>
-                        <p className="text-lg font-black text-emerald-400 mt-1">{data.pcr}</p>
+                        <p className="text-lg font-black text-emerald-400 mt-1">{"{"}data.pcr{"}"}</p>
                       </div>
                       <div className="bg-[#0d1322] p-4 rounded-xl border border-slate-800">
                         <p className="text-[10px] text-slate-400 uppercase font-bold">Upper Band</p>
-                        <p className="text-lg font-black text-emerald-400 mt-1">\${(data.current * 1.08).toFixed(2)}</p>
+                        <p className="text-lg font-black text-emerald-400 mt-1">${"{"}(data.current * 1.08).toFixed(2){"}"}</p>
                       </div>
                     </div>
                   </div>
@@ -199,8 +199,8 @@ const htmlContent = `<!DOCTYPE html>
                   <div className="flex flex-col h-80 bg-[#0d1322] border border-slate-800 rounded-2xl p-4">
                     <div className="flex-1 overflow-y-auto space-y-2 text-xs">
                       {chatMessages.map((m, i) => (
-                        <div key={i} className={\`p-2.5 rounded-xl \${m.sender === 'user' ? 'bg-blue-600 text-white ml-auto max-w-[80%]' : 'bg-black text-slate-200 max-w-[85%]'}\`}>
-                          {m.text}
+                        <div key={i} className={"p-2.5 rounded-xl " + (m.sender === 'user' ? 'bg-blue-600 text-white ml-auto max-w-[80%]' : 'bg-black text-slate-200 max-w-[85%]')}>
+                          {"{"}m.text{"}"}
                         </div>
                       ))}
                     </div>
@@ -209,7 +209,7 @@ const htmlContent = `<!DOCTYPE html>
                         type="text" 
                         value={chatInput} 
                         onChange={(e) => setChatInput(e.target.value)}
-                        placeholder={\`Ask Copilot about \${ticker}...\`}
+                        placeholder={"Ask Copilot about " + ticker + "..."}
                         className="flex-1 bg-black border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                       />
                       <button type="submit" className="bg-cyan-500 text-black px-3 py-2 rounded-xl text-xs font-bold">Send</button>
