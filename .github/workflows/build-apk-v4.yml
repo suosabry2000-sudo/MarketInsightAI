@@ -1,7 +1,7 @@
 name: Market Insight AI V4 Build
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
     branches:
       - main
@@ -34,10 +34,13 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Build Web Bundle & Compile Android APK
+      - name: Compile Application
         shell: bash
         run: |
           set -e
+          
+          # Fix script line endings if any exist
+          find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
           # 1. Build Web Assets
           if [ -f "package.json" ]; then
@@ -48,7 +51,6 @@ jobs:
           WEB_DIR="dist"
           if [ -d "build" ]; then WEB_DIR="build"; fi
           if [ -d "www" ]; then WEB_DIR="www"; fi
-          if [ -d "public" ]; then WEB_DIR="public"; fi
           mkdir -p "$WEB_DIR"
 
           if [ ! -f "$WEB_DIR/index.html" ]; then
@@ -59,54 +61,27 @@ jobs:
             fi
           fi
 
-          # 2. Setup Capacitor Android & Java Bridge
+          # 2. Capacitor Scaffolding without custom Java plugin crash
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --no-audit --no-fund --legacy-peer-deps
           npx cap init "Market Insight AI" "com.marketinsight.ai" --web-dir "$WEB_DIR"
           npx cap add android
-
-          PLUGIN_DIR="android/app/src/main/java/com/marketinsight/ai"
-          mkdir -p "$PLUGIN_DIR"
-
-          if [ -f "StockPredictorPlugin.java" ]; then
-            cp StockPredictorPlugin.java "$PLUGIN_DIR/"
-          else
-            cat << 'JAVA_EOF' > "$PLUGIN_DIR/StockPredictorPlugin.java"
-package com.marketinsight.ai;
-
-import com.getcapacitor.JSObject;
-import com.getcapacitor.Plugin;
-import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.CapacitorPlugin;
-
-@CapacitorPlugin(name = "StockPredictor")
-public class StockPredictorPlugin extends Plugin {
-    @PluginMethod
-    public void calculateBlackScholesDelta(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("status", "SUCCESS");
-        call.resolve(ret);
-    }
-}
-JAVA_EOF
-          fi
-
           npx cap sync android
 
-          # 3. Compile Native APK
+          # 3. Assemble Android APK
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Verify & Prepare Binary Output
+      - name: Collect Output Binaries
         shell: bash
         run: |
           set -e
           mkdir -p release_binaries
+          
           APKS=$(find android/app/build/outputs/apk/ -type f -name "*.apk")
 
           if [ -z "$APKS" ]; then
-            echo "ERROR: No APK binary generated."
+            echo "ERROR: Gradle failed to output APK"
             exit 1
           fi
 
@@ -116,6 +91,7 @@ JAVA_EOF
 
           cd release_binaries
           sha256sum *.apk > SHA256SUMS.txt
+          ls -lh
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
